@@ -67,12 +67,10 @@
         </select>
       </label>
       <label>Deepgram API key <input id="cfgDeepgramKey" type="password" placeholder="built-in demo key used if empty" /></label>
-      <label>Spoken language (Deepgram)
+      <label>Call languages (Deepgram)
         <select id="cfgSttLanguage">
-          <option value="auto">Auto-detect per utterance — Hindi / English / Arabic (default)</option>
-          <option value="en">English only</option>
-          <option value="hi">Hindi only</option>
-          <option value="ar">Arabic only</option>
+          <option value="en-hi">English + Hindi (default)</option>
+          <option value="en-ar">English + Arabic</option>
         </select>
       </label>
       <label>Whisper model (local engine only)

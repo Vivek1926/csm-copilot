@@ -593,10 +593,10 @@ async function loadSettings() {
   el.cfgAnswerPersonaId.value = cfg.answerPersonaId || '';
   el.cfgSttEngine.value = cfg.sttEngine || 'deepgram';
   el.cfgDeepgramKey.value = cfg.deepgramApiKey || '';
-  // auto/en/hi/ar supported; older stored values (e.g. 'multi') map to auto.
-  el.cfgSttLanguage.value = ['auto', 'en', 'hi', 'ar'].includes(cfg.sttLanguage)
+  // Language pairs: en-hi / en-ar. Older stored values map to the default.
+  el.cfgSttLanguage.value = ['en-hi', 'en-ar'].includes(cfg.sttLanguage)
     ? cfg.sttLanguage
-    : 'auto';
+    : 'en-hi';
   el.cfgSttModel.value = cfg.sttModel || 'onnx-community/whisper-small';
   el.cfgTerms.value = cfg.domainTerms || '';
 }

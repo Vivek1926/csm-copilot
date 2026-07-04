@@ -74,10 +74,10 @@ function initWhisperWorker(modelId) {
 }
 
 function sttDeviceLabel() {
-  const lang = ['auto', 'en', 'hi', 'ar'].includes(config.sttLanguage)
+  const pair = ['en-hi', 'en-ar'].includes(config.sttLanguage)
     ? config.sttLanguage
-    : 'auto';
-  return `deepgram · ${lang.toUpperCase()}`;
+    : 'en-hi';
+  return `deepgram · ${pair.toUpperCase()}`;
 }
 
 function initSttEngine() {

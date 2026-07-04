@@ -11,16 +11,22 @@ const DEFAULT_DG_KEY = '01060c81de87383d4021a68a59bf3be1af2f4c37';
 const DG_URL = 'https://api.deepgram.com/v1/listen';
 const REQUEST_TIMEOUT_MS = 20000;
 
-// Spoken-language handling. Speakers on one call may mix Hindi, English and
-// Arabic, so the default is per-utterance AUTO-DETECTION: each VAD utterance
-// is its own request with detect_language=true, and nova-3 reports which
-// language it heard. Manual pins (en/hi/ar) remain for when detection
-// misbehaves. All combos verified live (HTTP 200), including keyterm
-// alongside detect_language. Candidate-restricted detection is NOT supported
-// by the API (400) — detection is open.
+// Spoken-language handling: the consultant selects the call's LANGUAGE PAIR
+// and the client identifies, per utterance, which of the two is being spoken.
+//
+// - 'en-hi' (default): one request with detection RESTRICTED to en+hi
+//   (repeated detect_language params — verified live). Open-set detection
+//   labeled short utterances as Swedish/Dutch/Indonesian and transcribed
+//   garbage; restricting the candidates makes that impossible.
+// - 'en-ar': 'ar' is not a valid detection candidate (the API 400s on it),
+//   so this mode runs TWO PINNED passes in parallel (language=en and
+//   language=ar) and keeps the higher-confidence transcript. No detection
+//   involved. Same latency (parallel), 2x calls.
+//
+// All request combos verified live (HTTP 200), including keyterm boosts.
 const MODEL = 'nova-3';
-export const SUPPORTED_LANGUAGES = new Set(['auto', 'en', 'hi', 'ar']);
-const DEFAULT_LANGUAGE = 'auto';
+export const SUPPORTED_LANGUAGES = new Set(['en-hi', 'en-ar']);
+const DEFAULT_LANGUAGE = 'en-hi';
 
 /** Float32 [-1,1] → Int16 PCM (linear16). */
 export function floatTo16BitPCM(float32) {
@@ -61,17 +67,36 @@ export class DeepgramClient {
    * @param {string[]} [keywords] boost words (domain terms)
    * @returns {{text: string, confidence: number|null, language: string|null}}
    *
-   * Language mode from config.sttLanguage (panel Settings): 'auto' (default —
-   * per-utterance detection, handles Hindi/English/Arabic speakers on the
-   * same call) or a pinned 'en' / 'hi' / 'ar'.
+   * Language pair from config.sttLanguage (panel Settings): 'en-hi'
+   * (default) or 'en-ar'. Per utterance, the client identifies which of the
+   * pair is being spoken.
    */
   async transcribe(audio, keywords = []) {
     const cfg = this.configProvider() || {};
-    const language = SUPPORTED_LANGUAGES.has(cfg.sttLanguage)
+    const mode = SUPPORTED_LANGUAGES.has(cfg.sttLanguage)
       ? cfg.sttLanguage
       : DEFAULT_LANGUAGE;
     const pcm = floatTo16BitPCM(audio);
-    return await this._request(pcm, MODEL, language, keywords);
+
+    if (mode === 'en-hi') {
+      // Single request, detection restricted to exactly these candidates.
+      return await this._request(pcm, MODEL, ['en', 'hi'], keywords);
+    }
+
+    // en-ar: two pinned passes in parallel; the more confident wins.
+    const [en, ar] = await Promise.allSettled([
+      this._request(pcm, MODEL, 'en', keywords),
+      this._request(pcm, MODEL, 'ar', keywords),
+    ]);
+    const enRes = en.status === 'fulfilled' ? en.value : null;
+    const arRes = ar.status === 'fulfilled' ? ar.value : null;
+
+    if (!enRes && !arRes) throw en.reason || ar.reason;
+    if (!enRes || !enRes.text) return arRes || enRes;
+    if (!arRes || !arRes.text) return enRes;
+    // Ties go to English (Arabic transliteration of English speech can score
+    // moderately, but real Arabic speech scores decisively higher on ar).
+    return (arRes.confidence ?? 0) > (enRes.confidence ?? 0) ? arRes : enRes;
   }
 
   async _request(pcm, model, language, keywords) {
@@ -83,14 +108,17 @@ export class DeepgramClient {
       sample_rate: '16000',
       channels: '1',
     });
-    if (language === 'auto') {
-      params.set('detect_language', 'true');
+    if (Array.isArray(language)) {
+      // Candidate-restricted detection: repeated detect_language params.
+      for (const lang of language) params.append('detect_language', lang);
     } else {
       params.set('language', language);
     }
     // keyterm boosting verified live for en/hi/ar and with detect_language.
     for (const kw of keywords) params.append('keyterm', kw);
-    console.log(`Deepgram request: ${model} / ${language}`);
+    console.log(
+      `Deepgram request: ${model} / ${Array.isArray(language) ? `detect(${language.join('+')})` : language}`
+    );
 
     const res = await fetch(`${DG_URL}?${params}`, {
       method: 'POST',
@@ -114,7 +142,7 @@ export class DeepgramClient {
       confidence: typeof alt?.confidence === 'number' ? alt.confidence : null,
       // Which language this utterance was heard in (from detection, or the
       // pinned setting).
-      language: channel?.detected_language || (language === 'auto' ? null : language),
+      language: channel?.detected_language || (Array.isArray(language) ? null : language),
     };
   }
 }

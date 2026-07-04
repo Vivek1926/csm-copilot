@@ -11,8 +11,13 @@ const DEFAULT_ANSWER_PERSONA = 2;
 const REQUEST_TIMEOUT_MS = 45000;
 
 // Appended to every question so answers fit the card during a live call —
-// the consultant needs scannable facts, not essay padding.
+// the consultant needs scannable facts, not essay padding. Non-English
+// questions (Hindi/Arabic calls) are translated before the knowledge search
+// so retrieval runs against the English documentation, and the answer is
+// always in English for the consultant.
 const ANSWER_STYLE_INSTRUCTION =
+  'If the question above is not in English, first translate it to English, then answer. ' +
+  'Always search and answer in English. ' +
   'Give me a to-the-point answer without filler sentences.';
 
 export class AnswerClient {

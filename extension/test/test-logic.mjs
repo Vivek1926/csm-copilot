@@ -333,57 +333,65 @@ function assert(cond, name) {
   assert(!kws.includes('DRM'), 'deepgram: short words excluded from boosts');
   assert(new Set(kws).size === kws.length, 'deepgram: keywords deduped');
 
-  // transcribe() parses the real response shape (captured from a live call).
-  let capturedUrl = '';
-  globalThis.fetch = async (url) => {
-    capturedUrl = String(url);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        results: { channels: [{ alternatives: [{ transcript: 'What is Seclore Online?', confidence: 0.98 }] }] },
-      }),
+  // Stub helper: route responses by the pinned language (or detection) in
+  // the request URL, and record every request.
+  let urls = [];
+  const resp = (transcript, confidence, detected_language) => ({
+    results: { channels: [{ detected_language, alternatives: [{ transcript, confidence }] }] },
+  });
+  const stub = (byLang) => {
+    urls = [];
+    globalThis.fetch = async (url) => {
+      urls.push(String(url));
+      const u = String(url);
+      const key = /[?&]language=ar/.test(u) ? 'ar' : /[?&]language=en/.test(u) ? 'en' : 'detect';
+      return { ok: true, status: 200, json: async () => byLang[key] };
     };
   };
 
-  // Default: AUTO — per-utterance detect_language on nova-3, keyterm boosts
-  // on (verified live). Handles Hindi/English/Arabic speakers on one call.
-  const dg = new DeepgramClient(() => ({}));
-  const out = await dg.transcribe(new Float32Array(1600), ['Seclore']);
-  assert(out.text === 'What is Seclore Online?' && out.confidence === 0.98, 'deepgram: transcript parsed');
-  assert(capturedUrl.includes('model=nova-3') && capturedUrl.includes('detect_language=true'), 'deepgram: default auto-detects language');
-  assert(!/[?&]language=/.test(capturedUrl), 'deepgram: no pinned language in auto mode');
-  assert(capturedUrl.includes('keyterm=Seclore'), 'deepgram: keyterm boost sent');
-  assert(capturedUrl.includes('sample_rate=16000') && capturedUrl.includes('encoding=linear16'), 'deepgram: PCM params set');
+  // Default pair en-hi: ONE request with detection RESTRICTED to en+hi
+  // (open-set detection labeled short utterances sv/nl/id and produced
+  // garbage); detection result surfaces on the segment.
+  stub({ detect: resp('यह क्या है?', 0.91, 'hi') });
+  const outHi = await new DeepgramClient(() => ({})).transcribe(new Float32Array(1600), ['Seclore']);
+  assert(outHi.text === 'यह क्या है?' && outHi.language === 'hi', 'deepgram: en-hi detects hindi');
+  assert(
+    urls.length === 1 && urls[0].includes('detect_language=en') && urls[0].includes('detect_language=hi'),
+    'deepgram: en-hi restricts detection to en+hi'
+  );
+  assert(!urls[0].includes('detect_language=true'), 'deepgram: en-hi never uses open-set detection');
+  assert(!/[?&]language=/.test(urls[0]), 'deepgram: en-hi request has no pinned language');
+  assert(urls[0].includes('keyterm=Seclore'), 'deepgram: keyterm boost sent');
+  assert(urls[0].includes('sample_rate=16000') && urls[0].includes('encoding=linear16'), 'deepgram: PCM params set');
 
-  // Pinned languages disable detection.
-  await new DeepgramClient(() => ({ sttLanguage: 'hi' })).transcribe(new Float32Array(1600), ['Seclore']);
-  assert(capturedUrl.includes('language=hi') && !capturedUrl.includes('detect_language'), 'deepgram: hindi pin supported');
-  await new DeepgramClient(() => ({ sttLanguage: 'ar' })).transcribe(new Float32Array(1600), ['Seclore']);
-  assert(capturedUrl.includes('language=ar') && capturedUrl.includes('keyterm=Seclore'), 'deepgram: arabic pin supported');
+  // en-ar pair, Arabic speech: two pinned passes; Arabic wins on confidence.
+  stub({
+    en: resp('was a video him', 0.52, null),
+    ar: resp('هل يدعم النظام تسجيل الدخول الموحد؟', 0.94, null),
+  });
+  const outAr = await new DeepgramClient(() => ({ sttLanguage: 'en-ar' })).transcribe(new Float32Array(1600), ['Seclore']);
+  assert(outAr.text.includes('؟') && outAr.language === 'ar', 'deepgram: en-ar identifies arabic speech');
+  assert(urls.length === 2, `deepgram: en-ar runs two pinned passes (${urls.length})`);
+  assert(urls.some((u) => /[?&]language=en/.test(u)) && urls.some((u) => /[?&]language=ar/.test(u)), 'deepgram: en-ar pins both languages');
+  assert(!urls.some((u) => u.includes('detect_language')), 'deepgram: en-ar uses no detection');
 
-  // Unsupported/stale configured values (e.g. old 'multi') fall back to auto.
-  await new DeepgramClient(() => ({ sttLanguage: 'multi' })).transcribe(new Float32Array(1600), []);
-  assert(capturedUrl.includes('detect_language=true'), 'deepgram: stale language value falls back to auto');
+  // en-ar pair, English speech: English pass wins (ties also go to English).
+  stub({
+    en: resp('What encryption does Seclore support?', 0.97, null),
+    ar: resp('وات انكريبشن', 0.71, null),
+  });
+  const outEn = await new DeepgramClient(() => ({ sttLanguage: 'en-ar' })).transcribe(new Float32Array(1600), []);
+  assert(outEn.language === 'en' && outEn.text.startsWith('What encryption'), 'deepgram: en-ar identifies english speech');
 
-  // detected_language from the response surfaces on the result.
-  globalThis.fetch = async (url) => {
-    capturedUrl = String(url);
-    return {
-      ok: true,
-      status: 200,
-      json: async () => ({
-        results: {
-          channels: [{
-            detected_language: 'hi',
-            alternatives: [{ transcript: 'यह क्या है?', confidence: 0.91 }],
-          }],
-        },
-      }),
-    };
-  };
-  const outHi = await new DeepgramClient(() => ({})).transcribe(new Float32Array(1600), []);
-  assert(outHi.language === 'hi' && outHi.text === 'यह क्या है?', 'deepgram: detected language surfaced');
+  // en-ar: if one pass fails or is empty, the other is used.
+  stub({ en: resp('', 0, null), ar: resp('سؤال عربي؟', 0.9, null) });
+  const outFallback = await new DeepgramClient(() => ({ sttLanguage: 'en-ar' })).transcribe(new Float32Array(1600), []);
+  assert(outFallback.text === 'سؤال عربي؟', 'deepgram: en-ar empty english pass falls to arabic');
+
+  // Stale stored values (old 'auto'/'multi'/'ar') fall back to en-hi.
+  stub({ detect: resp('hello there, everyone', 0.9, 'en') });
+  await new DeepgramClient(() => ({ sttLanguage: 'auto' })).transcribe(new Float32Array(1600), []);
+  assert(urls.length === 1 && urls[0].includes('detect_language=en'), 'deepgram: stale value falls back to en-hi');
 
   // API errors surface with status + body.
   globalThis.fetch = async () => ({ ok: false, status: 400, text: async () => 'bad request' });
