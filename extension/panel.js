@@ -4,14 +4,13 @@
 import { MSG, TARGET, request, broadcast } from './lib/messaging.js';
 import { renderAnswerInto } from './lib/markdown.js';
 import { AnswerClient } from './lib/answers.js';
+import { buildSummaryPrompt } from './lib/summary.js';
 
 const $ = (id) => document.getElementById(id);
 
 const el = {
   statusDot: $('statusDot'),
   statusText: $('statusText'),
-  deviceBadge: $('deviceBadge'),
-  latencyBadge: $('latencyBadge'),
   toggleBtn: $('toggleBtn'),
   modelProgress: $('modelProgress'),
   progressPct: $('progressPct'),
@@ -39,6 +38,22 @@ const el = {
 
 let capturing = false;
 let lastFinalText = '';
+
+// Session accumulator for the post-call summary: every finalized utterance
+// and detected question of the current capture session.
+const session = {
+  transcript: [],           // [{t, text}]
+  questions: new Map(),     // questionId -> {q, answered}
+  summaryDone: false,
+  hasContent() {
+    return this.transcript.length > 0 || this.questions.size > 0;
+  },
+  reset() {
+    this.transcript = [];
+    this.questions = new Map();
+    this.summaryDone = false;
+  },
+};
 
 const STATE_LABELS = {
   idle: 'Idle',
@@ -91,16 +106,22 @@ el.toggleBtn.addEventListener('click', async () => {
 });
 
 function setState(state, extra = {}) {
+  const wasCapturing = capturing;
   capturing = state === 'capturing' || state === 'loading-model' || state === 'starting';
+
+  // Fresh capture session begins: clear the previous session's accumulator.
+  if (state === 'starting') session.reset();
+  // Capture just ended with content: generate the post-call summary card.
+  if (wasCapturing && state === 'idle' && session.hasContent() && !session.summaryDone) {
+    session.summaryDone = true;
+    generateCallSummary();
+  }
+
   el.statusDot.className = `dot ${state}`;
   el.statusText.textContent = STATE_LABELS[state] || state;
   el.toggleBtn.textContent = capturing ? 'Stop' : 'Start';
   el.toggleBtn.classList.toggle('primary', !capturing);
 
-  if (extra.device) {
-    el.deviceBadge.textContent = extra.device.toUpperCase();
-    el.deviceBadge.hidden = false;
-  }
   if (state === 'idle') {
     el.hintText.textContent = 'Not capturing';
     el.liveHint.className = 'live-hint';
@@ -127,10 +148,15 @@ function hideBanner() {
 let localAnswerClient = null;
 let localAskCounter = 0;
 
-async function localAsk(text) {
+async function getAnswerClient() {
   const cfg = await chrome.storage.local.get(['astraBaseUrl', 'astraApiKey', 'answerPersonaId']);
   if (!localAnswerClient) localAnswerClient = new AnswerClient(() => cfg);
-  localAnswerClient.configProvider = () => cfg; // fresh settings on every ask
+  localAnswerClient.configProvider = () => cfg; // fresh settings on every use
+  return localAnswerClient;
+}
+
+async function localAsk(text) {
+  const client = await getAnswerClient();
 
   const event = {
     questionId: `qlocal_${++localAskCounter}_${Date.now()}`,
@@ -143,9 +169,123 @@ async function localAsk(text) {
     trigger: 'manual',
   };
   renderQuestionCard(event);
-  localAnswerClient.getAnswer(text, (result) =>
+  client.getAnswer(text, (result) =>
     renderAnswer({ questionId: event.questionId, ...result })
   );
+}
+
+// ---------------------------------------------------------------------------
+// Post-call summary + follow-up email draft
+// ---------------------------------------------------------------------------
+
+let summaryCounter = 0;
+
+async function generateCallSummary() {
+  const prompt = buildSummaryPrompt(
+    session.transcript,
+    [...session.questions.values()]
+  );
+
+  const summaryId = `summary_${++summaryCounter}_${Date.now()}`;
+  el.emptyFeed.hidden = true;
+
+  const card = document.createElement('div');
+  card.className = 'qcard summary-card';
+  card.dataset.questionId = summaryId;
+
+  const head = document.createElement('div');
+  head.className = 'qhead';
+  const icon = document.createElement('span');
+  icon.className = 'summary-icon';
+  icon.textContent = '📋';
+  const title = document.createElement('div');
+  title.className = 'query';
+  title.textContent = 'Call Summary & Follow-up';
+  head.appendChild(icon);
+  head.appendChild(title);
+  card.appendChild(head);
+
+  const answer = document.createElement('div');
+  answer.className = 'answer loading';
+  answer.dir = 'auto';
+  answer.textContent = '⏳ Summarizing the call… 0s';
+  card.appendChild(answer);
+
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = `${new Date().toLocaleTimeString()} · ${session.transcript.length} utterances · ${session.questions.size} questions`;
+  meta.appendChild(time);
+
+  let rawMarkdown = '';
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'iconbtn';
+  copyBtn.textContent = '📄 Copy';
+  copyBtn.title = 'Copy summary + email as markdown';
+  copyBtn.disabled = true;
+  copyBtn.addEventListener('click', async () => {
+    await navigator.clipboard.writeText(rawMarkdown).catch(() => {});
+    copyBtn.textContent = '✓ Copied';
+    setTimeout(() => (copyBtn.textContent = '📄 Copy'), 1500);
+  });
+  meta.appendChild(copyBtn);
+
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'iconbtn';
+  downloadBtn.textContent = '⬇ Download';
+  downloadBtn.title = 'Download summary + email as a markdown file';
+  downloadBtn.disabled = true;
+  downloadBtn.addEventListener('click', () => {
+    const now = new Date();
+    const stamp = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}_${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+    const header = `# Call Summary — ${now.toLocaleString()}\n\n_${session.transcript.length} utterances · ${session.questions.size} questions detected_\n\n`;
+    const blob = new Blob([header + rawMarkdown], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `call-summary_${stamp}.md`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  });
+  meta.appendChild(downloadBtn);
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'iconbtn';
+  dismissBtn.textContent = '✕';
+  dismissBtn.title = 'Dismiss';
+  dismissBtn.addEventListener('click', () => {
+    clearAnswerTimer(summaryId);
+    card.remove();
+    if (!el.questionFeed.querySelector('.qcard')) el.emptyFeed.hidden = false;
+  });
+  meta.appendChild(dismissBtn);
+  card.appendChild(meta);
+
+  el.questionFeed.prepend(card); // above everything, including pinned cards
+
+  const startedAt = Date.now();
+  const intervalId = setInterval(() => {
+    const s = Math.round((Date.now() - startedAt) / 1000);
+    answer.textContent = `⏳ Summarizing the call… ${s}s`;
+  }, 1000);
+  answerTimers.set(summaryId, { intervalId, startedAt });
+
+  const client = await getAnswerClient();
+  client.getAnswer(prompt, (result) => {
+    clearAnswerTimer(summaryId);
+    if (!card.isConnected) return; // dismissed while generating
+    if (result.ok) {
+      rawMarkdown = result.answer;
+      answer.className = 'answer loaded';
+      renderAnswerInto(answer, result.answer);
+      copyBtn.disabled = false;
+      downloadBtn.disabled = false;
+    } else {
+      answer.className = 'answer error';
+      answer.textContent = `⚠ ${result.error}`;
+    }
+  });
 }
 
 async function manualAsk() {
@@ -225,12 +365,8 @@ function renderHint({ speaking, transcribing }) {
 
 function renderTranscript(segment) {
   lastFinalText = segment.text;
+  session.transcript.push({ t: segment.startMs, text: segment.text });
   if (!el.manualText.value) el.manualText.placeholder = segment.text;
-
-  if (segment.sttMs != null) {
-    el.latencyBadge.textContent = `stt ${(segment.sttMs / 1000).toFixed(1)}s`;
-    el.latencyBadge.hidden = false;
-  }
 
   const entry = document.createElement('div');
   entry.className = 'tentry';
@@ -262,8 +398,21 @@ function clearAnswerTimer(questionId) {
   return timer;
 }
 
+// The ✅/⏳ chip on each card: reflects (and lets the consultant override)
+// whether a question counts as answered — this feeds the call summary.
+// On hover it previews the action a click will perform, so the flip never
+// comes as a surprise.
+function updateAnsweredToggle(btn, answered) {
+  btn.dataset.answered = String(answered);
+  btn.textContent = answered ? '✅ Answered' : '⏳ Follow-up';
+  btn.classList.toggle('on', answered);
+  btn.classList.toggle('off', !answered);
+}
+
 function renderQuestionCard(event) {
   el.emptyFeed.hidden = true;
+  const entry = { q: event.refinedQuery, answered: false, manual: false };
+  session.questions.set(event.questionId, entry);
 
   const card = document.createElement('div');
   card.className = 'qcard';
@@ -321,6 +470,25 @@ function renderQuestionCard(event) {
   time.textContent = new Date(event.createdAt).toLocaleTimeString();
   meta.appendChild(time);
 
+  const answeredBtn = document.createElement('button');
+  answeredBtn.className = 'iconbtn answered-toggle';
+  answeredBtn.title =
+    'Toggle answered vs needs follow-up — this drives the ✅/⏳ list in the call summary';
+  updateAnsweredToggle(answeredBtn, entry.answered);
+  answeredBtn.addEventListener('click', () => {
+    entry.answered = !entry.answered;
+    entry.manual = true; // consultant's word beats the auto-inference
+    updateAnsweredToggle(answeredBtn, entry.answered);
+  });
+  // Preview the click action on hover instead of silently flipping state.
+  answeredBtn.addEventListener('mouseenter', () => {
+    answeredBtn.textContent = entry.answered ? 'Mark ⏳ follow-up?' : 'Mark ✅ answered?';
+  });
+  answeredBtn.addEventListener('mouseleave', () => {
+    updateAnsweredToggle(answeredBtn, entry.answered);
+  });
+  meta.appendChild(answeredBtn);
+
   const pinBtn = document.createElement('button');
   pinBtn.className = 'iconbtn';
   pinBtn.textContent = '📌';
@@ -364,11 +532,18 @@ function renderQuestionCard(event) {
 }
 
 function renderAnswer({ questionId, ok, answer, error }) {
+  const entry = session.questions.get(questionId);
+  // Auto-infer "answered" when Astra returns — unless the consultant has
+  // already toggled it by hand.
+  if (ok && entry && !entry.manual) entry.answered = true;
+
   const card = el.questionFeed.querySelector(
     `.qcard[data-question-id="${questionId}"]`
   );
   const timer = clearAnswerTimer(questionId);
   if (!card) return; // card was dismissed before the answer arrived
+  const toggle = card.querySelector('.answered-toggle');
+  if (toggle && entry) updateAnsweredToggle(toggle, entry.answered);
   const answerEl = card.querySelector('.answer');
   if (!answerEl) return;
 

@@ -434,6 +434,41 @@ That covers the main options.`;
   assert(t2 && t2.header === null && t2.rows.length === 2, 'table: header-less table handled');
 }
 
+// ---------------- Post-call summary prompt ----------------------------------
+{
+  const { buildSummaryPrompt } = await import('../lib/summary.js');
+
+  const transcript = [
+    { t: 5000, text: 'Thanks for joining, today we will cover Seclore Online.' },
+    { t: 21000, text: 'What encryption does Seclore support?' },
+    { t: 60000, text: 'Okay that makes sense, and what about IP restrictions?' },
+  ];
+  const questions = [
+    { q: 'What encryption does Seclore support?', answered: true },
+    { q: 'Is IP restriction based on private or public IP?', answered: false },
+  ];
+
+  const prompt = buildSummaryPrompt(transcript, questions);
+  assert(prompt.includes('## Meeting Summary') && prompt.includes('## Follow-up Email Draft'), 'summary: prompt has required sections');
+  assert(prompt.includes('[answered on call] What encryption'), 'summary: answered question marked');
+  assert(prompt.includes('[NEEDS FOLLOW-UP] Is IP restriction'), 'summary: open question marked');
+  assert(prompt.includes('[5s] Thanks for joining'), 'summary: transcript timestamped');
+
+  // Long transcripts keep the tail and note the truncation.
+  const long = Array.from({ length: 800 }, (_, i) => ({
+    t: i * 5000,
+    text: `Utterance number ${i} with some padding words to add length here.`,
+  }));
+  const p2 = buildSummaryPrompt(long, [], 5000);
+  assert(p2.includes('(earlier part truncated)'), 'summary: truncation noted');
+  assert(p2.includes('Utterance number 799'), 'summary: tail of transcript kept');
+  assert(!p2.includes('Utterance number 1 '), 'summary: head of transcript dropped');
+  assert(p2.length < 7000, `summary: prompt bounded (${p2.length} chars)`);
+
+  // Empty question list handled.
+  assert(buildSummaryPrompt(transcript, []).includes('(none detected)'), 'summary: no-questions case');
+}
+
 // ---------------- AnswerClient: Astra retrieval (test.py flow) --------------
 {
   const { AnswerClient } = await import('../lib/answers.js');

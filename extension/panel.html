@@ -6,42 +6,60 @@
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
-    <header id="statusBar">
-      <span id="statusDot" class="dot idle"></span>
-      <span id="statusText">Idle</span>
-      <span id="deviceBadge" class="badge" hidden></span>
-      <span id="latencyBadge" class="badge" hidden></span>
-      <button id="toggleBtn" class="primary">Start</button>
+    <header id="appHeader">
+      <div class="brand">
+        <div class="logo">
+          <svg viewBox="0 0 2232 1256" xmlns="http://www.w3.org/2000/svg" aria-label="Seclore">
+            <path d="M1639.53 1256H390.773V994.124H1533.97V765.195H626.226C469.234 756.81 390.773 703.406 390.773 604.927V149.243C390.773 57.0666 469.164 7.32667 625.994 0H1840.69V268.133H692.833V500.19H1637.75C1763.74 500.19 1831.39 544.092 1840.67 631.919V1102.33C1831.38 1204.79 1764.34 1256 1639.52 1256H1639.53Z" fill="currentColor"/>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <div class="brand-name">Co-Pilot</div>
+          <div class="brand-sub">Pre-Sales Assistant</div>
+        </div>
+      </div>
+      <div id="statusBar">
+        <span class="status-pill">
+          <span id="statusDot" class="dot idle"></span>
+          <span id="statusText">Idle</span>
+        </span>
+        <button id="toggleBtn" class="primary">Start</button>
+      </div>
     </header>
 
     <div id="modelProgress" hidden>
-      <div class="progress-label">Loading Whisper model… <span id="progressPct"></span></div>
+      <div class="progress-label">Loading speech model… <span id="progressPct"></span></div>
       <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
     </div>
 
     <div id="banner" class="banner" hidden></div>
 
     <div id="liveHint" class="live-hint">
-      <span class="hint-label">●</span>
+      <span class="hint-label"><i></i><i></i><i></i></span>
       <span id="hintText">Not capturing</span>
     </div>
 
     <section id="manualAsk">
-      <input id="manualText" type="text" placeholder="Type or edit a question…" />
-      <button id="askBtn" title="Bypass detection, refine and ask this directly">Ask this</button>
+      <input id="manualText" type="text" placeholder="Type a question to ask…" />
+      <button id="askBtn" title="Bypass detection, ask directly">Ask&nbsp;↗</button>
     </section>
 
     <section id="questionFeed">
-      <div id="emptyFeed" class="empty">Detected questions will appear here, newest on top.</div>
+      <div id="emptyFeed" class="empty">
+        <div class="empty-icon">🎧</div>
+        <div class="empty-title">Listening for questions</div>
+        <div class="empty-sub">Detected customer questions appear here as cards,
+          newest on top — with answers fetched automatically.</div>
+      </div>
     </section>
 
     <details id="transcriptLog">
-      <summary>Transcript (last 12 utterances)</summary>
+      <summary>Transcript <span class="summary-hint">last 12 utterances</span></summary>
       <div id="transcriptEntries"></div>
     </details>
 
     <details id="settings">
-      <summary>Settings</summary>
+      <summary>Settings <span class="summary-hint">STT · language · Astra</span></summary>
       <label>STT engine
         <select id="cfgSttEngine">
           <option value="deepgram">Deepgram cloud — accurate, instant start (default)</option>
@@ -67,7 +85,7 @@
         <textarea id="cfgTerms" rows="2" placeholder="Seclore, Seclore Online, policy server, …"></textarea>
       </label>
       <p class="note">Model change takes effect on the next capture start (Stop, then click
-        the toolbar icon). First use of a model downloads it once (~150 MB for small).</p>
+        the toolbar icon). First use of a model downloads it once (~250 MB for small).</p>
       <label>Astra Base URL <input id="cfgBaseUrl" type="text" placeholder="https://astra.seclore.com" /></label>
       <label>Astra API key <input id="cfgApiKey" type="password" placeholder="on_…" /></label>
       <label>Refiner Persona ID (Stage-2 question cleanup) <input id="cfgPersonaId" type="number" placeholder="3" /></label>

@@ -114,7 +114,11 @@ Your key is stored only in this browser's local extension storage.
    - **Tags** — detected topics (SSO, encryption, …). `manual` means you
      triggered it yourself; `unrefined` means no LLM was available.
 5. **Press Stop** when the call ends. Tab audio and transcription stop
-   immediately.
+   immediately — and a **📋 Call Summary & Follow-up card** appears at the
+   top of the feed: a meeting summary, every detected question marked
+   ✅ answered / ⏳ needs follow-up, and a ready-to-send follow-up email
+   draft. Use **📄 Copy** to grab it as markdown, or **⬇ Download** to save
+   it as a dated `.md` file (`call-summary_2026-07-04_1530.md`).
 
 ### Card controls
 
