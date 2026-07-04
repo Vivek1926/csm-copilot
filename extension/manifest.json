@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Pre-Sales Co-Pilot",
+  "version": "0.1.0",
+  "description": "Live technical-question detection for Google Meet calls. Local Whisper STT, side-panel UI.",
+  "permissions": [
+    "tabCapture",
+    "offscreen",
+    "sidePanel",
+    "storage",
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://meet.google.com/*",
+    "https://huggingface.co/*",
+    "https://*.huggingface.co/*",
+    "https://*.hf.co/*",
+    "https://astra.seclore.com/*",
+    "https://api.deepgram.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "panel.html"
+  },
+  "action": {
+    "default_title": "Open Pre-Sales Co-Pilot"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://meet.google.com/*"],
+      "js": ["content.js"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  }
+}

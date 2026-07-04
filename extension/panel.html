@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Pre-Sales Co-Pilot</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header id="statusBar">
+      <span id="statusDot" class="dot idle"></span>
+      <span id="statusText">Idle</span>
+      <span id="deviceBadge" class="badge" hidden></span>
+      <span id="latencyBadge" class="badge" hidden></span>
+      <button id="toggleBtn" class="primary">Start</button>
+    </header>
+
+    <div id="modelProgress" hidden>
+      <div class="progress-label">Loading Whisper model… <span id="progressPct"></span></div>
+      <div class="progress-track"><div id="progressFill" class="progress-fill"></div></div>
+    </div>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <div id="liveHint" class="live-hint">
+      <span class="hint-label">●</span>
+      <span id="hintText">Not capturing</span>
+    </div>
+
+    <section id="manualAsk">
+      <input id="manualText" type="text" placeholder="Type or edit a question…" />
+      <button id="askBtn" title="Bypass detection, refine and ask this directly">Ask this</button>
+    </section>
+
+    <section id="questionFeed">
+      <div id="emptyFeed" class="empty">Detected questions will appear here, newest on top.</div>
+    </section>
+
+    <details id="transcriptLog">
+      <summary>Transcript (last 12 utterances)</summary>
+      <div id="transcriptEntries"></div>
+    </details>
+
+    <details id="settings">
+      <summary>Settings</summary>
+      <label>STT engine
+        <select id="cfgSttEngine">
+          <option value="deepgram">Deepgram cloud — accurate, instant start (default)</option>
+          <option value="whisper">Whisper local — private, works offline</option>
+        </select>
+      </label>
+      <label>Deepgram API key <input id="cfgDeepgramKey" type="password" placeholder="built-in demo key used if empty" /></label>
+      <label>Spoken language (Deepgram)
+        <select id="cfgSttLanguage">
+          <option value="auto">Auto-detect per utterance — Hindi / English / Arabic (default)</option>
+          <option value="en">English only</option>
+          <option value="hi">Hindi only</option>
+          <option value="ar">Arabic only</option>
+        </select>
+      </label>
+      <label>Whisper model (local engine only)
+        <select id="cfgSttModel">
+          <option value="onnx-community/whisper-small">whisper-small — accurate (default)</option>
+          <option value="onnx-community/whisper-base">whisper-base — fast, less accurate</option>
+        </select>
+      </label>
+      <label>Domain terms (comma-separated) — misheard words are auto-corrected to these
+        <textarea id="cfgTerms" rows="2" placeholder="Seclore, Seclore Online, policy server, …"></textarea>
+      </label>
+      <p class="note">Model change takes effect on the next capture start (Stop, then click
+        the toolbar icon). First use of a model downloads it once (~150 MB for small).</p>
+      <label>Astra Base URL <input id="cfgBaseUrl" type="text" placeholder="https://astra.seclore.com" /></label>
+      <label>Astra API key <input id="cfgApiKey" type="password" placeholder="on_…" /></label>
+      <label>Refiner Persona ID (Stage-2 question cleanup) <input id="cfgPersonaId" type="number" placeholder="3" /></label>
+      <label>Answer Persona ID (knowledge lookup) <input id="cfgAnswerPersonaId" type="number" placeholder="2" /></label>
+      <button id="saveCfg">Save</button>
+      <span id="cfgSaved" class="saved" hidden>Saved ✓</span>
+      <p class="note">Without an Astra key, detection still works — questions are emitted from
+        the heuristic gate without LLM refinement (marked "unrefined").</p>
+    </details>
+
+    <script type="module" src="panel.js"></script>
+  </body>
+</html>
